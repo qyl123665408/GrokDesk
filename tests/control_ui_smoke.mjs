@@ -1,0 +1,58 @@
+import {createRequire} from 'node:module';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const browser = await chromium.launch({headless:true, ...(process.env.PLAYWRIGHT_BROWSER_EXECUTABLE ? {executablePath:process.env.PLAYWRIGHT_BROWSER_EXECUTABLE} : {})});
+const page = await browser.newPage({viewport:{width:1440,height:960}});
+const errors=[];
+page.on('pageerror', error => errors.push(error.message));
+const output = path.resolve(here,'../test-output');
+await fs.mkdir(output,{recursive:true});
+try {
+  await page.goto('http://127.0.0.1:8766');
+  await page.waitForFunction(() => document.querySelector('#controlStart') && document.querySelector('#historyList').children.length);
+  await page.locator('#computerMode').click();
+  assert.deepEqual(await page.locator('#controlMode option').allTextContents(),['需要确认','完全权限']);
+  assert.equal(await page.locator('#controlMode').inputValue(),'confirm');
+  await page.locator('#controlTask').fill('[confirm] 合成界面验证');
+  await page.screenshot({path:path.join(output,'control-modes.png')});
+  await page.locator('#controlStart').click();
+  await page.locator('#controlApprovalDialog[open]').waitFor();
+  assert.ok(await page.locator('#controlActionText').textContent().then(text => text.includes('20') && text.includes('30')));
+  await page.screenshot({path:path.join(output,'control-approval.png')});
+  await page.locator('#controlApprove').click();
+  await page.waitForFunction(() => document.querySelector('#controlBanner').hidden);
+  await page.locator('#computerMode').click();
+  assert.match(await page.locator('#controlStatus').textContent(),/任务完成/);
+  await page.locator('#controlMode').selectOption('auto');
+  await page.locator('#controlTask').fill('[auto] 合成连续任务');
+  await page.locator('#controlStart').click();
+  await page.waitForFunction(() => !document.querySelector('#controlBanner').hidden);
+  await page.waitForFunction(() => document.querySelector('#controlBanner').hidden);
+  assert.equal(await page.locator('#controlApprovalDialog').getAttribute('open'),null);
+  await page.locator('#computerMode').click();
+  assert.match(await page.locator('#controlLog').textContent(),/合成测试输入/);
+  await page.locator('#controlMode').selectOption('confirm');
+  await page.locator('#controlTask').fill('[reject] 拒绝动作');
+  await page.locator('#controlStart').click();
+  await page.locator('#controlApprovalDialog[open]').waitFor();
+  await page.locator('#controlReject').click();
+  await page.waitForFunction(() => document.querySelector('#controlBanner').hidden);
+  await page.locator('#computerMode').click();
+  assert.match(await page.locator('#controlStatus').textContent(),/停止/);
+  await page.locator('#controlTask').fill('[stop] 停止动作');
+  await page.locator('#controlStart').click();
+  await page.locator('#controlApprovalDialog[open]').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('#controlBanner').hidden);
+  assert.equal(await page.locator('#controlApprovalDialog').getAttribute('open'),null);
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({passed:true,checks:['two permission modes','confirm action and screenshot','approval then completion','auto continuous actions without approval','reject and escape stop','no page errors']}));
+} finally {
+  await browser.close();
+}

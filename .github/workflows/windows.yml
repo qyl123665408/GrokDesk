@@ -1,0 +1,84 @@
+name: Windows desktop
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grokdesk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.lock.txt
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Build Windows desktop
+        shell: pwsh
+        run: ./build.ps1 -PythonExecutable (Get-Command python).Source
+      - name: Check packaged service with synthetic data
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path test-output -Force | Out-Null
+          python tests/verify_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check archive and create checksum
+        run: python scripts/check_release_archive.py dist/GrokDesk-Windows.zip
+      - name: Upload desktop download
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GrokDesk-Windows
+          path: |
+            dist/GrokDesk-Windows.zip
+            dist/GrokDesk-Windows.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified desktop
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: GrokDesk-Windows
+          path: dist
+      - name: Publish version download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/grokdesk-release.md" <<'NOTES'
+          下载 GrokDesk-Windows.zip，完整解压后运行 GrokDesk.exe。
+
+          桌面组件需要 WebView2 Runtime 和 .NET Framework 4.8。
+          升级前关闭软件，并备份设置中显示的数据目录。更新时保留原有 GrokDeskData。
+          ZIP 不包含 API 密钥、聊天记录或附件；使用自己的模型服务和额度。
+
+          GrokDesk-Windows.zip.sha256 可用于校验下载文件。
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/GrokDesk-Windows.zip dist/GrokDesk-Windows.zip.sha256 --verify-tag --title "GrokDesk ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/grokdesk-release.md"

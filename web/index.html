@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="session-token" content="__SESSION_TOKEN__">
+  <meta name="color-scheme" content="light dark">
+  <title>Grok Desk</title>
+  <link rel="icon" href="./icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./vendor/marked.umd.js"></script>
+  <script defer src="./vendor/purify.min.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+<svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+ <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+ <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+ <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-.6 2.4-2 .9L4 5.6 2 9l1.8 1.7v2.6L2 15l2 3.4 2.4-.7 2 .9L9 21h6l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L22 9l-2-3.4-2.4.7-2-.9L15 3z"/><circle cx="12" cy="12" r="3"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+ <symbol id="i-clip" viewBox="0 0 24 24"><path d="m8 12 6-6a3.5 3.5 0 0 1 5 5l-9 9a5 5 0 0 1-7-7L13 3m-6 12 9-9"/></symbol>
+ <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 16-6-6L4 21"/></symbol>
+ <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H5v20h14V7l-5-5v5h5M8 12h8m-8 4h6"/></symbol>
+ <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8z"/></symbol>
+ <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 5-7 7 7 7m8-14 7 7-7 7m-3-17-2 20"/></symbol>
+ <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+ <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+ <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 8a9 9 0 1 0 1 8M20 3v6h-6"/></symbol>
+ <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M3 16v5h18v-5"/></symbol>
+ <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+ <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11a9 9 0 0 1-9 9H3l1.5-5A9 9 0 1 1 21 11Z"/></symbol>
+ <symbol id="i-pin" viewBox="0 0 24 24"><path d="m14 3 7 7-4 1-4 5-2-2-7 7m4-10L6 9l5-4z"/></symbol>
+ <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
+ <symbol id="i-edit" viewBox="0 0 24 24"><path d="m16 3 5 5L8 21H3v-5zM13 6l5 5"/></symbol>
+ <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14A9 9 0 0 1 10 3a9 9 0 1 0 10.5 11Z"/></symbol>
+ <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 1v2m0 18v2M1 12h2m18 0h2M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+ <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+ <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 3h9v12H3zM3 9V3h7l3 3h8v3"/></symbol>
+ <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+ <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+ <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+ <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+</svg>
+<div class="app-shell">
+ <aside class="sidebar" id="sidebar">
+  <div class="brand"><span class="brand-mark"><svg><use href="#i-spark"/></svg></span><span>Grok Desk</span><button class="icon-button" id="sidebarCollapse" title="收起侧边栏" aria-label="收起侧边栏"><svg><use href="#i-sidebar"/></svg></button></div>
+  <button class="new-chat" id="newChat"><svg><use href="#i-edit"/></svg><span>新对话</span><kbd>Ctrl K</kbd></button>
+  <label class="history-search"><svg><use href="#i-search"/></svg><input id="historySearch" placeholder="搜索对话" aria-label="搜索聊天记录"></label>
+  <div class="history-heading"><span>聊天记录</span><span id="historyCount">0</span></div>
+  <nav id="historyList" class="history-list" aria-label="历史对话"></nav>
+  <div class="sidebar-bottom">
+   <button class="settings-button" id="openSettings" aria-label="连接与偏好设置"><span class="settings-icon"><svg><use href="#i-settings"/></svg></span><span>设置<small id="connectionLabel">配置模型连接</small></span></button>
+   <button id="themeToggle" class="icon-button" aria-label="切换深浅主题" title="切换深浅主题"><svg><use href="#i-moon"/></svg></button>
+  </div>
+ </aside>
+ <button class="sidebar-backdrop" id="sidebarBackdrop" aria-label="关闭侧边栏" hidden></button>
+ <main class="main empty-state">
+  <header class="topbar">
+   <div class="topbar-leading"><button class="icon-button sidebar-toggle" id="sidebarToggle" aria-label="展开侧边栏" title="展开侧边栏"><svg><use href="#i-sidebar"/></svg></button><div class="model-control"><select id="modelSelect" aria-label="选择模型"><option value="">Grok</option></select><svg><use href="#i-chevron"/></svg></div></div>
+   <div class="topbar-actions"><span class="connection-pill" id="connectionPill"><i></i><span>等待连接</span></span><button class="icon-button" id="exportChat" aria-label="导出对话" title="导出对话"><svg><use href="#i-download"/></svg></button><button class="icon-button" id="conversationMenu" aria-label="对话选项" title="对话选项"><svg><use href="#i-more"/></svg></button></div>
+  </header>
+  <div class="startup-notice" id="startupNotice" hidden><span>当前为界面预览。聊天请双击项目文件夹里的「启动 GrokDesk.vbs」。</span><a href="http://127.0.0.1:18791">打开运行中的软件 ↗</a></div>
+  <div class="control-banner" id="controlBanner" hidden><button id="controlShowProgress"><svg><use href="#i-monitor"/></svg><span id="controlBannerText">正在控制电脑</span></button><button class="secondary-button" id="controlBannerStop">停止</button></div>
+  <div class="chat-area" id="chatArea">
+   <section class="welcome" id="welcome">
+    <h1>今天有什么想聊的？</h1>
+   </section>
+   <section class="messages" id="messages" aria-live="polite" aria-label="聊天消息"></section>
+  </div>
+  <div class="composer-area">
+   <div class="composer" id="composer">
+    <div id="attachmentTray" class="attachment-tray"></div>
+    <textarea id="messageInput" rows="1" placeholder="向 Grok 发送消息" aria-label="输入消息"></textarea>
+    <div class="image-options" id="imageOptions" hidden><label>比例<select id="imageSize" aria-label="图片比例"><option value="auto">默认比例</option><option value="square">方图</option><option value="landscape">横图</option><option value="portrait">竖图</option></select></label><label>数量<select id="imageCount" aria-label="生成数量"><option value="1">1 张</option><option value="2">2 张</option><option value="3">3 张</option><option value="4">4 张</option></select></label><button class="text-button" id="imageModelSettings">模型设置</button></div>
+    <div class="composer-toolbar"><div class="composer-tools"><button class="icon-button" id="attachFile" aria-label="添加文件" title="添加文件 · 每个最多 20 MB"><svg><use href="#i-plus"/></svg></button><button class="icon-button" id="attachImage" aria-label="添加图片" title="添加图片 · 也可直接粘贴"><svg><use href="#i-image"/></svg></button><button class="image-mode-button" id="imageMode" aria-label="生成图片" aria-pressed="false" title="切换生成图片"><svg><use href="#i-spark"/></svg><span>生图</span><svg class="mode-close"><use href="#i-close"/></svg></button><button class="image-mode-button" id="computerMode" aria-label="控制电脑" title="查看屏幕并点击、输入"><svg><use href="#i-monitor"/></svg><span>控制电脑</span></button></div><button id="sendButton" class="send-button" aria-label="发送消息" disabled><svg><use href="#i-arrow"/></svg></button></div>
+   </div>
+   <div class="suggestions"><button class="suggestion" data-action="generate"><svg><use href="#i-spark"/></svg>生成图片</button><button class="suggestion" data-action="image"><svg><use href="#i-image"/></svg>分析图片</button><button class="suggestion" data-action="file"><svg><use href="#i-file"/></svg>总结文件</button></div>
+   <div class="composer-footnote"><span id="composerStatus">Enter 发送 · Shift + Enter 换行</span><span>请核实重要信息</span></div>
+  </div>
+ </main>
+</div>
+<input type="file" id="fileInput" multiple hidden accept=".txt,.md,.csv,.tsv,.json,.jsonl,.xml,.yaml,.yml,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.sql,.c,.cpp,.h,.cs,.java,.go,.rs,.sh,.ps1,.toml,.ini,.srt,.vtt,.pdf,.docx,.xlsx,.pptx,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff">
+<input type="file" id="imageInput" multiple hidden accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff">
+<div class="drop-overlay" id="dropOverlay" hidden><svg><use href="#i-folder"/></svg><strong>把文件放在这里</strong><span>图片和文档，一起交给 Grok</span></div>
+<div class="toast-stack" id="toastStack" role="status"></div>
+<div class="context-menu" id="contextMenu" hidden></div>
+<dialog id="settingsDialog" class="settings-dialog">
+ <div class="dialog-heading"><h2>设置</h2><button class="icon-button" data-close="settingsDialog" aria-label="关闭设置"><svg><use href="#i-close"/></svg></button></div>
+ <div class="dialog-scroll">
+  <section class="settings-section"><div class="section-title"><div><h3>模型连接</h3><p>设置一次，下次直接开始聊天。</p></div><button class="text-button" id="toggleImport">粘贴连接信息</button></div>
+   <div id="importArea" class="import-area" hidden><label>连接信息 JSON<textarea id="connectionJson" rows="3" placeholder="把包含 key 和 url 的整段连接信息粘贴到这里"></textarea></label><button class="secondary-button" id="importConnection">填入连接信息</button></div>
+   <label>API 地址<input id="baseUrl" type="url" placeholder="https://ergouzi.life" autocomplete="off"></label><p class="field-hint">已预填你的服务地址，带不带 /v1 都可以。</p>
+   <label>API 密钥<div class="key-field"><input id="apiKey" type="password" placeholder="粘贴以 sk- 开头的密钥" autocomplete="off" spellcheck="false"><button class="icon-button" id="toggleKey" aria-label="显示或隐藏密钥"><svg><use href="#i-eye"/></svg></button></div></label><p class="field-hint" id="keyHint">密钥会由 Windows 加密后保存在本机。</p>
+   <label>默认模型<div class="model-field"><input id="settingsModel" list="modelOptions" placeholder="获取列表后选择，也可以手动填写"><button class="secondary-button" id="fetchModels"><svg><use href="#i-refresh"/></svg>获取模型</button></div><datalist id="modelOptions"></datalist></label><div id="connectionResult" class="connection-result" hidden></div>
+   <label>生图模型<input id="settingsImageModel" list="imageModelOptions" placeholder="选择有权限的生图模型，或填写准确名称"><datalist id="imageModelOptions"></datalist></label><p class="field-hint" id="imageModelHint">生图和聊天使用同一把密钥，需要服务商开通对应模型。</p>
+  </section>
+  <details class="settings-section settings-advanced"><summary>回答与阅读偏好<svg><use href="#i-chevron"/></svg></summary>
+   <label>助手指令<textarea id="systemPrompt" rows="3" placeholder="例如：用中文回答，先给结论，再给步骤。"></textarea></label>
+   <div class="settings-grid"><label>随机性 <span class="subtle">0–2</span><input id="temperature" type="number" min="0" max="2" step="0.1"></label><label>最大回复长度 <span class="subtle">Token</span><input id="maxTokens" type="number" min="256" max="65536" step="256"></label><label>携带最近几轮对话<input id="contextTurns" type="number" min="1" max="100"></label><label>聊天字号<select id="fontSize"><option value="13">小 · 13px</option><option value="15">标准 · 15px</option><option value="17">大 · 17px</option><option value="19">特大 · 19px</option></select></label></div>
+  </details>
+  <div class="data-location"><svg><use href="#i-folder"/></svg><div>聊天和附件存储位置<code id="dataLocation"></code></div></div>
+  <div class="app-runtime"><p>关闭窗口后仍可重新打开。<br><span>退出软件会停止当前回复，并保存已有内容。</span></p><button class="text-button danger" id="exitApp">退出软件</button></div>
+ </div>
+ <div class="dialog-footer"><span>密钥留空会保留已保存的密钥</span><button class="primary-button" id="saveSettings">保存设置<svg><use href="#i-check"/></svg></button></div>
+</dialog>
+<dialog id="smallDialog" class="small-dialog"><h2 id="smallTitle"></h2><p id="smallDescription"></p><input id="smallInput" hidden><div class="small-actions"><button class="secondary-button" id="smallCancel">取消</button><button class="primary-button" id="smallConfirm">确定</button></div></dialog>
+<dialog id="controlDialog" class="control-dialog">
+ <div class="dialog-heading"><h2>控制电脑</h2><button class="icon-button" data-close="controlDialog" aria-label="关闭控制面板"><svg><use href="#i-close"/></svg></button></div>
+ <div class="control-dialog-body">
+  <p class="control-intro">Grok 会查看屏幕并执行点击、输入、按键和滚动。屏幕截图会发送到你设置的模型服务。</p>
+  <label>任务<textarea id="controlTask" rows="3" maxlength="8000" placeholder="例如：在记事本里输入一段自我介绍"></textarea></label>
+  <label>使用模型<input id="controlModel" list="modelOptions" placeholder="选择支持看图的聊天模型"></label>
+  <div class="control-grid"><label>权限模式<select id="controlMode"><option value="confirm">需要确认</option><option value="auto">完全权限</option></select></label><label>最多步骤<input id="controlMaxSteps" type="number" min="1" max="50" value="20"></label></div>
+  <p class="field-hint" id="controlModeHint">每个动作先展示给你，允许后才执行。</p>
+  <p class="control-boundary">权限范围：查看屏幕、点击、输入、按键、滚动；可随时停止。</p>
+  <div class="control-status" id="controlStatus" role="status">输入任务后开始。</div>
+  <ol class="control-log" id="controlLog" aria-label="电脑操作记录"></ol>
+  <div class="control-screen" id="controlScreen" hidden><img id="controlScreenImage" alt="最近一次屏幕截图"><span id="controlScreenLabel">最近屏幕</span></div>
+ </div>
+ <div class="dialog-footer control-dialog-footer"><span id="controlStepLabel">0 / 20 步</span><div><button class="secondary-button" id="controlStop" disabled>停止</button><button class="primary-button" id="controlStart">开始控制<svg><use href="#i-monitor"/></svg></button></div></div>
+</dialog>
+<dialog id="controlApprovalDialog" class="control-approval-dialog">
+ <div class="dialog-heading"><h2>确认电脑动作</h2></div>
+ <div class="control-approval-body"><p id="controlActionText"></p><p class="field-hint" id="controlActionReason"></p><div class="control-approval-screen" id="controlApprovalScreen" hidden><img id="controlApprovalImage" alt="执行动作前的屏幕截图"></div></div>
+ <div class="small-actions"><button class="secondary-button" id="controlReject">拒绝并停止</button><button class="primary-button" id="controlApprove">允许执行</button></div>
+</dialog>
+<dialog id="imageDialog" class="image-dialog"><button class="icon-button" data-close="imageDialog" aria-label="关闭图片"><svg><use href="#i-close"/></svg></button><img id="previewImage" alt="附件图片预览"></dialog>
+</body>
+</html>

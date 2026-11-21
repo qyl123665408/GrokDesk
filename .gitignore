@@ -1,0 +1,56 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Builds and temporary verification output
+build/
+dist/
+test-output/
+*.spec
+*.log
+*.log.*
+*.tmp
+*.bak
+
+# Private runtime data, credentials and exports
+GrokDeskData/
+settings.json
+settings.json.*
+settings.tmp
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+attachments/
+desktop-profile/
+webview-profile/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Node/browser test dependencies
+node_modules/
+playwright-report/
+test-results/
+
+# Local editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

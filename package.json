@@ -1,0 +1,15 @@
+{
+  "name": "grokdesk",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Browser UI checks for the GrokDesk Windows desktop app",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}
