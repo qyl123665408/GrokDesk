@@ -14,7 +14,7 @@ class DataLocationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.program = self.root / 'program'
         self.program.mkdir()
         self.portable = self.program / 'GrokDeskData'

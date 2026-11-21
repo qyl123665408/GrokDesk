@@ -55,6 +55,7 @@ npm run install:browsers
 打包后，可以用独立的本地合成数据检查发布程序：
 
 ```powershell
+New-Item -ItemType Directory -Path .\test-output -Force | Out-Null
 .\.venv\Scripts\python.exe tests\verify_release.py
 .\.venv\Scripts\python.exe tests\verify_control_release.py
 .\.venv\Scripts\python.exe tests\verify_native_desktop_release.py
@@ -82,7 +83,7 @@ git pull --ff-only
 
 更新源码后，关闭正在运行的 GrokDesk，安装变更后的 Python 依赖，再运行 `build.ps1` 重新生成桌面版。用户数据目录独立于源码；构建脚本会先备份已有便携数据，生成干净 ZIP 后再恢复本机数据。
 
-GitHub Actions 会在每次推送后执行 Windows 单元测试和打包，并提供可下载的 ZIP 构建产物。推送以 `v` 开头的版本标签时，会创建对应的 GitHub Release 并附上 ZIP。自动构建不会执行需要可交互桌面的原生 GUI 测试，也不会使用个人 API 密钥。
+GitHub Actions 会在推送到 `main` 分支或推送以 `v` 开头的版本标签时执行 Windows 单元测试和打包，并提供可下载的 ZIP 构建产物。版本标签还会创建对应的 GitHub Release 并附上 ZIP。自动构建不会执行需要可交互桌面的原生 GUI 测试，也不会使用个人 API 密钥。
 
 ## 本地数据和版本管理
 
