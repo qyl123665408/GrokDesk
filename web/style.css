@@ -103,7 +103,7 @@ kbd { font:10px 'Segoe UI',sans-serif; color:var(--muted); }
 .image-options select { background:transparent; border:0; color:var(--ink); outline:none; max-width:115px; padding:5px 2px; cursor:pointer; font-size:12px; }
 .image-options select option { background:var(--panel); }
 .image-options .text-button { margin-left:auto; color:var(--sub); font-size:10px; }
-.image-mode #attachFile, .image-mode #attachImage { display:none; }
+.image-mode #attachFile { display:none; }
 .image-generation.assistant .message-attachments { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(270px,100%),1fr)); gap:14px; }
 .image-generation.assistant .image-card { min-width:0; }
 .image-generation.assistant .image-card img { width:100%; max-width:520px; max-height:540px; object-fit:contain; background:var(--sidebar); }

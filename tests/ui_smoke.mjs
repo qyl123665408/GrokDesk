@@ -73,12 +73,49 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.screenshot({path:path.join(output,'03-dark.png')});
   await page.getByRole('button',{name:'切换深浅主题'}).click();
+  const slowConversationId = await page.locator('.history-item.active').getAttribute('data-conversation');
   await page.locator('#messageInput').fill('synthetic-slow-response');
   await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await page.locator('.message.assistant').nth(2).getByText('本地停止测试', {exact:false}).waitFor();
+  await page.locator('#newChat').click();
+  await page.locator('#messageInput').fill('parallel-second-conversation');
+  await page.getByRole('button',{name:'发送消息',exact:true}).click();
+  await page.waitForFunction(() => {
+    const active = document.querySelector('.history-item.active');
+    return active?.querySelector('.history-item-title')?.textContent === 'parallel-second-conversation';
+  });
+  const survivorConversationId = await page.locator('.history-item.active').getAttribute('data-conversation');
+  await page.locator('.message.assistant').last().getByText('独立会话回复：parallel-second-conversation', {exact:true}).waitFor();
+  await page.locator('.message.assistant').last().getByRole('button',{name:'重新生成'}).waitFor();
+  let releaseStaleNavigation;
+  let staleNavigationStarted;
+  let staleNavigationResponse;
+  const staleNavigationRequest = new Promise((resolve) => { staleNavigationStarted = resolve; });
+  await page.route('**/api/conversations/' + slowConversationId, async (route) => {
+    if (!releaseStaleNavigation) {
+      await new Promise((resolve) => { releaseStaleNavigation = resolve; staleNavigationStarted(); });
+    }
+    await route.continue();
+  }, {times:1});
+  await page.locator('#historyList [data-conversation="' + slowConversationId + '"]').click();
+  await staleNavigationRequest;
+  await page.locator('#historyList [data-conversation="' + survivorConversationId + '"]').click();
+  await page.waitForFunction((id) => document.querySelector('.history-item.active')?.dataset.conversation === id, survivorConversationId);
+  staleNavigationResponse = page.waitForResponse('**/api/conversations/' + slowConversationId);
+  releaseStaleNavigation();
+  await staleNavigationResponse;
+  await page.unroute('**/api/conversations/' + slowConversationId);
+  await page.waitForFunction((id) => localStorage.getItem('grok-active') === id, survivorConversationId);
+  assert.equal(await page.locator('.history-item.active').getAttribute('data-conversation'),survivorConversationId);
+  await page.locator('#historyList [data-conversation="' + slowConversationId + '"]').click();
+  await page.getByRole('button',{name:'停止生成',exact:true}).waitFor();
   await page.getByRole('button',{name:'停止生成',exact:true}).click();
   await page.getByText('已停止生成 · 已有内容已保存',{exact:true}).waitFor();
   await page.getByRole('button',{name:'重新生成',exact:true}).waitFor();
+  await page.locator('#historyList [data-conversation="' + survivorConversationId + '"]').click();
+  await page.locator('.message.assistant').last().getByText('独立会话回复：parallel-second-conversation', {exact:true}).waitFor();
+  await page.locator('#historyList [data-conversation="' + slowConversationId + '"]').click();
+  await page.locator('.message.user').first().getByText('请查看这张测试图片', {exact:false}).waitFor();
   const downloadPromise = page.waitForEvent('download');
   await page.locator('#exportChat').click();
   const download = await downloadPromise;
@@ -110,7 +147,7 @@ try {
   await page.locator('#openSettings').click();
   await page.locator('#exitApp').click();
   await page.locator('#smallCancel').click();
-  assert.equal(await page.evaluate(async () => (await api('/bootstrap')).version), '1.4.0');
+  assert.equal(await page.evaluate(async () => (await api('/bootstrap')).version), '1.5.0');
   await page.locator('#exitApp').click();
   await page.locator('#smallConfirm').click();
   await page.getByText('Grok Desk 已退出。再次使用请双击桌面上的 Grok Desk 图标。', {exact:true}).waitFor();

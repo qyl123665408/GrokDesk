@@ -183,7 +183,7 @@ def main():
         bootstrap = client.get('/api/bootstrap').raise_for_status().json()
         assert Path(bootstrap['data_dir']).resolve() == folder.resolve(), 'Unexpected service data directory'
         owned_server = True
-        assert bootstrap['version'] == '1.4.0', bootstrap['version']
+        assert bootstrap['version'] == '1.5.0', bootstrap['version']
         modes = re.search(r'<select\b[^>]*\bid="controlMode"[^>]*>(.*?)</select>', html, re.S)
         assert modes, 'Packaged control mode selector is missing'
         options = re.findall(r'<option\b[^>]*value="([^"]+)"[^>]*>\s*([^<]+?)\s*</option>', modes[1])

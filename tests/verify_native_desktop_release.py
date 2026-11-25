@@ -21,7 +21,7 @@ import httpx
 parser = argparse.ArgumentParser(description=__doc__)
 root = Path(__file__).resolve().parents[1]
 parser.add_argument('--binary', type=Path, default=root / 'dist' / 'GrokDesk' / 'GrokDesk.exe')
-parser.add_argument('--expected-version', default='1.4.0')
+parser.add_argument('--expected-version', default='1.5.0')
 args = parser.parse_args()
 binary = args.binary.resolve()
 assert binary.is_file(), f'Packaged executable is missing: {binary}'

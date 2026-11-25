@@ -1,5 +1,6 @@
 """Exercise the PyInstaller executable and its bundled local web UI end to end."""
 import base64
+import argparse
 import json
 import os
 import re
@@ -14,7 +15,9 @@ from pathlib import Path
 import httpx
 
 root = Path(__file__).resolve().parents[1]
-binary = root / 'dist' / 'GrokDesk' / 'GrokDesk.exe'
+parser = argparse.ArgumentParser()
+parser.add_argument('--binary', type=Path, default=root / 'dist' / 'GrokDesk' / 'GrokDesk.exe')
+binary = parser.parse_args().binary.resolve()
 assert binary.is_file() and binary.stat().st_size > 1_000_000, 'portable application was not packaged'
 
 

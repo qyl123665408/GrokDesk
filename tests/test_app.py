@@ -21,6 +21,9 @@ from app import Database, create_server
 
 class SyntheticProvider(BaseHTTPRequestHandler):
     payloads = []
+    parallel_barrier = None
+    parallel_survivor_started = None
+    parallel_survivor_release = None
 
     def log_message(self, *args):
         pass
@@ -38,6 +41,8 @@ class SyntheticProvider(BaseHTTPRequestHandler):
         self.payloads.append(payload)
         current = payload['messages'][-1]['content']
         current = current if isinstance(current, str) else current[0]['text']
+        if current.startswith(('synthetic-parallel-', 'synthetic-isolation-')) and self.parallel_barrier:
+            self.parallel_barrier.wait(timeout=5)
         if current == 'synthetic-provider-error':
             raw = json.dumps({'error': {'message': 'Synthetic credential rejection'}}).encode()
             self.send_response(401)
@@ -53,17 +58,36 @@ class SyntheticProvider(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
+        if current == 'synthetic-slow-json-response':
+            raw = json.dumps({'choices': [{'message': {'content': 'Synthetic delayed response body'}}]}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            time.sleep(0.12)
+            self.wfile.write(raw)
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.end_headers()
         try:
             chunks = ['# 本地测试回复\n\n', '已收到中文消息和附件。\n\n', '| 检查项 | 结果 |\n|---|---|\n| 图片与文档 | 已接收 |\n\n', '\x60\x60\x60python\nprint("hello")\n\x60\x60\x60']
+            if current.startswith('synthetic-parallel-'):
+                chunks = ['专属回复：' + current]
+            if current == 'parallel-second-conversation':
+                chunks = ['独立会话回复：' + current]
+            if current == 'synthetic-isolation-slow':
+                chunks = ['隔离测试慢回复 ' + str(i) + '\n' for i in range(100)]
+            if current == 'synthetic-isolation-survivor':
+                self.parallel_survivor_started.set()
+                self.parallel_survivor_release.wait(timeout=5)
+                chunks = ['独立会话已完成：' + current]
             if current == 'synthetic-slow-response':
                 chunks = ['本地停止测试 ' + str(i) + '\n' for i in range(100)]
             for content in chunks:
                 self.wfile.write(('data: ' + json.dumps({'choices': [{'delta': {'content': content}}]}, ensure_ascii=False) + '\n\n').encode())
                 self.wfile.flush()
-                time.sleep(0.06 if current == 'synthetic-slow-response' else 0.01)
+                time.sleep(0.04 if current in ('synthetic-slow-response', 'synthetic-isolation-slow') else 0.01)
             self.wfile.write(b'data: {"choices":[],"usage":{"total_tokens":42}}\n\ndata: [DONE]\n\n')
         except (OSError, ValueError):
             pass
@@ -141,6 +165,9 @@ class WorkflowTests(unittest.TestCase):
         conversation = self.send(conversation, '请查看这些合成测试附件', ids)
         self.assertEqual(conversation['messages'][-1]['status'], 'complete')
         self.assertEqual(conversation['messages'][-1]['usage']['total_tokens'], 42)
+        self.assertGreaterEqual(conversation['messages'][-1]['usage']['grokdesk_timing']['total_ms'], conversation['messages'][-1]['usage']['grokdesk_timing']['request_ms'])
+        self.assertIsNotNone(conversation['messages'][-1]['usage']['grokdesk_timing']['first_token_ms'])
+        self.assertTrue(conversation['messages'][-1]['usage']['grokdesk_timing']['streaming'])
         content = SyntheticProvider.payloads[-1]['messages'][-1]['content']
         self.assertTrue(any(part['type'] == 'image_url' and part['image_url']['url'].startswith('data:image/png;base64,') for part in content))
         document_text = '\n'.join(part['text'] for part in content if part['type'] == 'text')
@@ -168,6 +195,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(conversation['messages'][0]['content'], 'synthetic-provider-error')
         conversation = self.send(conversation, 'synthetic-json-response')
         self.assertEqual(conversation['messages'][-1]['content'], 'Synthetic non-stream response')
+        timing = conversation['messages'][-1]['usage']['grokdesk_timing']
+        self.assertFalse(timing['streaming'])
+        self.assertIsNone(timing['first_token_ms'])
+        conversation = self.send(conversation, 'synthetic-slow-json-response')
+        timing = conversation['messages'][-1]['usage']['grokdesk_timing']
+        self.assertFalse(timing['streaming'])
+        self.assertGreaterEqual(timing['response_ms'], 100)
+        self.assertGreater(timing['response_ms'], timing['request_ms'])
 
     def test_stop_preserves_partial_response(self):
         conversation = self.request('POST', '/conversations', {})
@@ -192,6 +227,87 @@ class WorkflowTests(unittest.TestCase):
         last = self.request('GET', '/conversations/' + conversation['id'])['messages'][-1]
         self.assertEqual(last['status'], 'stopped')
         self.assertTrue(last['content'])
+
+    def test_different_conversations_generate_concurrently_and_isolate_results(self):
+        first = self.request('POST', '/conversations', {})
+        second = self.request('POST', '/conversations', {})
+        barrier = threading.Barrier(2)
+        SyntheticProvider.parallel_barrier = barrier
+        outcomes = {}
+        failures = []
+
+        def generate(conversation, text):
+            try:
+                with httpx.Client(base_url=self.client.base_url, headers=dict(self.client.headers), timeout=15, trust_env=False) as client:
+                    response = client.post('/api/chat', json={'conversation_id':conversation['id'], 'text':text, 'model':'grok-desk-synthetic'})
+                    outcomes[text] = (response.status_code, response.text)
+            except Exception as error:
+                failures.append(error)
+
+        threads = [
+            threading.Thread(target=generate, args=(first, 'synthetic-parallel-first')),
+            threading.Thread(target=generate, args=(second, 'synthetic-parallel-second')),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        SyntheticProvider.parallel_barrier = None
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(failures, [])
+        self.assertEqual({key: value[0] for key, value in outcomes.items()}, {'synthetic-parallel-first':200, 'synthetic-parallel-second':200})
+        first_result = self.request('GET', '/conversations/' + first['id'])
+        second_result = self.request('GET', '/conversations/' + second['id'])
+        self.assertEqual(first_result['messages'][-1]['content'], '专属回复：synthetic-parallel-first')
+        self.assertEqual(second_result['messages'][-1]['content'], '专属回复：synthetic-parallel-second')
+
+    def test_stopping_one_concurrent_generation_does_not_stop_another(self):
+        slow = self.request('POST', '/conversations', {})
+        survivor = self.request('POST', '/conversations', {})
+        SyntheticProvider.parallel_barrier = threading.Barrier(2)
+        SyntheticProvider.parallel_survivor_started = threading.Event()
+        SyntheticProvider.parallel_survivor_release = threading.Event()
+        outcomes = {}
+
+        def generate(conversation, text):
+            with httpx.Client(base_url=self.client.base_url, headers=dict(self.client.headers), timeout=15, trust_env=False) as client:
+                response = client.post('/api/chat', json={'conversation_id':conversation['id'], 'text':text, 'model':'grok-desk-synthetic'})
+                outcomes[conversation['id']] = response.status_code
+
+        threads = [
+            threading.Thread(target=generate, args=(slow, 'synthetic-isolation-slow')),
+            threading.Thread(target=generate, args=(survivor, 'synthetic-isolation-survivor')),
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            assistant_id = None
+            for _ in range(100):
+                messages = self.request('GET', '/conversations/' + slow['id'])['messages']
+                if messages and messages[-1]['role'] == 'assistant' and messages[-1]['content']:
+                    assistant_id = messages[-1]['id']
+                    break
+                time.sleep(0.03)
+            self.assertIsNotNone(assistant_id)
+            self.assertTrue(SyntheticProvider.parallel_survivor_started.wait(timeout=5))
+            self.request('POST', '/chat/' + assistant_id + '/stop', {})
+            SyntheticProvider.parallel_survivor_release.set()
+            for thread in threads:
+                thread.join(10)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(outcomes, {slow['id']:200, survivor['id']:200})
+            slow_result = self.request('GET', '/conversations/' + slow['id'])['messages'][-1]
+            survivor_result = self.request('GET', '/conversations/' + survivor['id'])['messages'][-1]
+            self.assertEqual(slow_result['status'], 'stopped')
+            self.assertTrue(slow_result['content'])
+            self.assertEqual(survivor_result['status'], 'complete')
+            self.assertEqual(survivor_result['content'], '独立会话已完成：synthetic-isolation-survivor')
+        finally:
+            if SyntheticProvider.parallel_survivor_release:
+                SyntheticProvider.parallel_survivor_release.set()
+            SyntheticProvider.parallel_barrier = None
+            SyntheticProvider.parallel_survivor_started = None
+            SyntheticProvider.parallel_survivor_release = None
 
 
 if __name__ == '__main__':

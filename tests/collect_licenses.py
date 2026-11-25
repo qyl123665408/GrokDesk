@@ -1,9 +1,12 @@
 import importlib.metadata
+import argparse
 from pathlib import Path
 import shutil
 
 root = Path(__file__).resolve().parents[1]
-folder = root / 'third_party'
+parser = argparse.ArgumentParser()
+parser.add_argument('--output', type=Path, default=root / 'third_party')
+folder = parser.parse_args().output.resolve()
 folder.mkdir(exist_ok=True)
 notices = ['Grok Desk bundled third-party notices', 'Installed distributions and license files follow.']
 for distribution in importlib.metadata.distributions():

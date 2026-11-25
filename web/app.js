@@ -2,8 +2,10 @@
 const $ = (selector) => document.querySelector(selector);
 const token = $('meta[name="session-token"]').content;
 const isPreview = location.protocol === 'file:';
-const state = {settings: {}, models: [], conversations: [], active: null, attachments: [], busy: false, uploading: 0, assistantId: null, abort: null, search: '', connected: false, mode:'chat', busyKind:'chat', polling:false};
+const state = {settings: {}, models: [], conversations: [], active: null, attachments: [], busy: false, submitting:false, uploading: 0, search: '', connected: false, mode:'chat', jobs:new Map()};
 const control = {running:false, runId:null, abort:null, step:0, maxSteps:20, mode:'confirm', screen:null, pending:null, stopping:false};
+let busyTicker = null;
+let navigationToken = 0;
 const isImageModel = (name) => /image|imagine|dall.e|flux|sdxl|stable.diffusion|seedream|ideogram|recraft|cogview|kolors|nano.banana/i.test(name) && !/video/i.test(name);
 const icon = (name) => '<svg aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
@@ -35,10 +37,16 @@ function resizeInput() {
   const field = $('#messageInput');
   field.style.height = 'auto';
   field.style.height = Math.min(field.scrollHeight, 180) + 'px';
-  $('#sendButton').disabled = control.running || (!state.busy && ((!field.value.trim() && !state.attachments.length) || state.uploading > 0));
+  $('#sendButton').disabled = control.running || state.submitting || (!state.busy && ((!field.value.trim() && !state.attachments.length) || state.uploading > 0));
 }
 function saveDraft() {
   try { localStorage.setItem('grok-draft-' + (state.active?.id || 'new'), $('#messageInput').value); } catch {}
+}
+function removeDraftIfUnchanged(id, value) {
+  try {
+    const key = 'grok-draft-' + id;
+    if (localStorage.getItem(key) === value) localStorage.removeItem(key);
+  } catch {}
 }
 function restoreDraft() {
   try { $('#messageInput').value = localStorage.getItem('grok-draft-' + (state.active?.id || 'new')) || ''; } catch { $('#messageInput').value = ''; }
@@ -65,11 +73,11 @@ function renderModels() {
   $('#modelOptions').innerHTML = state.models.map((name) => '<option value="' + esc(name) + '"></option>').join('');
   const imageModels = state.models.filter(isImageModel);
   $('#imageModelOptions').innerHTML = imageModels.map((name) => '<option value="' + esc(name) + '"></option>').join('');
-  $('#imageModelHint').textContent = state.models.length && !imageModels.length ? '当前密钥返回的列表没有生图模型。请向服务商开通权限，或换用支持生图的密钥。' : '生图和聊天使用同一把密钥。列表按名称筛选，实际生图权限由服务商决定。';
+  $('#imageModelHint').textContent = state.models.length && !imageModels.length ? '当前密钥返回的列表没有生图模型。请向服务商开通权限，或换用支持生图的密钥。' : '文字生图需要 /images/generations；参考图编辑需要服务商支持 /images/edits。权限由服务商决定。';
 }
-function setMode(mode) {
-  if (state.busy || state.uploading) return;
-  if (mode === 'image' && state.attachments.length) return toast('生图根据文字描述生成，请先移除输入框里的附件。');
+function setMode(mode, force = false) {
+  if ((!force && state.busy) || state.uploading) return;
+  if (mode === 'image' && state.attachments.some((item) => !item.image_name)) return toast('参考图生图只接受图片附件，请先移除其他文件。');
   state.mode = mode;
   const image = mode === 'image';
   $('.main').classList.toggle('image-mode', image);
@@ -77,9 +85,11 @@ function setMode(mode) {
   $('#imageOptions').hidden = !image;
   $('#imageSize').value = state.settings.image_size || 'auto';
   $('#imageCount').value = String(state.settings.image_count || 1);
-  $('#attachFile').disabled = image; $('#attachImage').disabled = image;
-  $('#messageInput').placeholder = image ? '描述你想生成的图片…' : '向 Grok 发送消息';
-  $('#welcome h1').textContent = image ? '想把什么画出来？' : '今天有什么想聊的？';
+  $('#attachFile').disabled = state.busy || image; $('#attachImage').disabled = state.busy;
+  $('#attachImage').title = image ? '添加参考图 · 最多 5 张' : '添加图片 · 也可直接粘贴';
+  $('#messageInput').placeholder = image ? (state.attachments.length ? '描述希望如何修改这张图片…' : '描述要生成的图片，或先添加参考图…') : '向 Grok 发送消息';
+  $('#welcome h1').textContent = image ? (state.attachments.length ? '你想怎样修改这张图片？' : '想把什么画出来？') : '今天有什么想聊的？';
+  $('#composerStatus').textContent = image ? '可只用文字生图，也可添加图片作为参考' : 'Enter 发送 · Shift + Enter 换行';
   renderModels(); resizeInput(); $('#messageInput').focus();
 }
 async function refreshHistory() {
@@ -98,7 +108,8 @@ function renderHistory() {
     const label = item.pinned ? '置顶' : (date === new Date().toDateString() ? '今天' : '更早');
     const heading = label === group ? '' : '<div class="history-date">' + label + '</div>';
     group = label;
-    return heading + '<div class="history-item' + (item.id === state.active?.id ? ' active' : '') + '" data-conversation="' + item.id + '" tabindex="0" role="button" aria-label="打开对话：' + esc(item.title) + '">' + icon(item.pinned ? 'pin' : 'chat') + '<div class="history-item-text"><div class="history-item-title">' + esc(item.title) + '</div><div class="history-item-preview">' + esc(item.preview || '开始你的第一条消息') + '</div></div><button class="history-more" data-history-menu="' + item.id + '" aria-label="对话选项">' + icon('more') + '</button></div>';
+    const preview = state.jobs.has(item.id) ? (state.jobs.get(item.id).kind === 'image' ? '正在生成图片…' : '正在等待回复…') : (item.preview || '开始你的第一条消息');
+    return heading + '<div class="history-item' + (item.id === state.active?.id ? ' active' : '') + '" data-conversation="' + item.id + '" tabindex="0" role="button" aria-label="打开对话：' + esc(item.title) + '">' + icon(item.pinned ? 'pin' : 'chat') + '<div class="history-item-text"><div class="history-item-title">' + esc(item.title) + '</div><div class="history-item-preview">' + esc(preview) + '</div></div><button class="history-more" data-history-menu="' + item.id + '" aria-label="对话选项">' + icon('more') + '</button></div>';
   }).join('');
 }
 function renderMarkdown(text) {
@@ -127,7 +138,7 @@ function messageContent(message) {
   if (message.kind === 'image') {
     const labels = {auto:'默认比例', square:'方图', landscape:'横图', portrait:'竖图'};
     body = (message.status === 'streaming' && !message.content ? '<div class="image-waiting"><div class="typing-indicator"><span></span><span></span><span></span></div><span>正在生成图片…</span></div>' : body);
-    if (message.role === 'assistant') body += '<div class="image-details">' + esc(message.model) + ' · ' + (labels[message.generation?.size] || '默认比例') + (message.generation?.images?.length ? ' · ' + message.generation.images.map((item) => item.width + ' × ' + item.height).join(' / ') : '') + '</div>';
+    if (message.role === 'assistant') body += '<div class="image-details">' + esc(message.model) + ' · ' + (message.generation?.edit ? '图片编辑' : '文字生图') + ' · ' + (labels[message.generation?.size] || '默认比例') + (message.generation?.images?.length ? ' · ' + message.generation.images.map((item) => item.width + ' × ' + item.height).join(' / ') : '') + '</div>';
   }
   if (message.error) body += '<div class="message-error">' + esc(message.error) + '</div>';
   if (message.status === 'stopped') body += '<div class="message-stopped">已停止生成 · 已有内容已保存</div>';
@@ -140,7 +151,10 @@ function renderMessages() {
   $('#messages').innerHTML = items.map((message, index) => {
     const assistant = message.role === 'assistant';
     const usage = message.usage?.total_tokens;
-    return '<article class="message ' + message.role + (message.kind === 'image' ? ' image-generation' : '') + '" id="msg-' + message.id + '"><div class="message-header"><span class="message-avatar">' + (assistant ? icon('spark') : '你') + '</span><span>' + (assistant ? 'Grok' : '你') + '</span><time title="' + esc(message.model || '') + '">' + timeLabel(message.created_at) + '</time></div><div class="message-body message-content">' + messageContent(message) + '</div><div class="message-actions"><button class="icon-button" data-copy="' + message.id + '" title="复制消息" aria-label="复制消息">' + icon('copy') + '</button>' + (assistant && index === items.length - 1 && !state.busy && message.status !== 'streaming' ? '<button class="icon-button" data-regenerate title="重新生成" aria-label="重新生成">' + icon('refresh') + '</button>' : '') + (usage ? '<span class="usage">' + usage.toLocaleString() + ' tokens</span>' : '') + '</div></article>';
+    const timing = message.timing || message.usage?.grokdesk_timing;
+    const duration = (value) => (Number(value) / 1000).toFixed(Number(value) < 10000 ? 1 : 0) + ' 秒';
+    const timingLabel = timing ? (timing.streaming ? '首字 ' + (timing.first_token_ms == null ? '无' : duration(timing.first_token_ms)) : '响应 ' + duration(timing.response_ms ?? timing.request_ms)) + ' · 总计 ' + duration(timing.total_ms) : '';
+    return '<article class="message ' + message.role + (message.kind === 'image' ? ' image-generation' : '') + '" id="msg-' + message.id + '"><div class="message-header"><span class="message-avatar">' + (assistant ? icon('spark') : '你') + '</span><span>' + (assistant ? 'Grok' : '你') + '</span><time title="' + esc(message.model || '') + '">' + timeLabel(message.created_at) + '</time></div><div class="message-body message-content">' + messageContent(message) + '</div><div class="message-actions"><button class="icon-button" data-copy="' + message.id + '" title="复制消息" aria-label="复制消息">' + icon('copy') + '</button>' + (assistant && index === items.length - 1 && !state.busy && message.status !== 'streaming' ? '<button class="icon-button" data-regenerate title="重新生成" aria-label="重新生成">' + icon('refresh') + '</button>' : '') + (timingLabel ? '<span class="usage">' + esc(timingLabel) + '</span>' : '') + (usage ? '<span class="usage">' + usage.toLocaleString() + ' tokens</span>' : '') + '</div></article>';
   }).join('');
 }
 function updateAssistant(message) {
@@ -149,6 +163,7 @@ function updateAssistant(message) {
 }
 function renderPending() {
   $('#attachmentTray').innerHTML = state.attachments.map((item) => '<div class="pending-attachment">' + (item.image_name ? '<img alt="' + esc(item.name) + '" src="' + fileUrl(item.id, true) + '">' : icon('file')) + '<span><strong>' + esc(item.name) + '</strong><small>' + sizeLabel(item.size) + (item.text_length ? ' · ' + item.text_length.toLocaleString() + ' 字' : '') + '</small></span><button class="icon-button" data-remove-attachment="' + item.id + '" aria-label="移除附件">' + icon('close') + '</button></div>').join('');
+  if (state.mode === 'image') $('#messageInput').placeholder = state.attachments.length ? '描述希望如何修改这张图片…' : '描述要生成的图片，或先添加参考图…';
   resizeInput();
 }
 async function clearPending() {
@@ -157,30 +172,41 @@ async function clearPending() {
   await Promise.allSettled(pending.map((item) => api('/attachments/' + item.id, {method:'DELETE'})));
 }
 async function openConversation(id) {
-  if (state.busy) return toast('请先等待回复完成，或点击停止生成。');
+  if (state.submitting) return toast('正在准备发送，请稍等。');
   if (state.uploading) return toast('文件还在读取，请稍等。');
+  const requestToken = ++navigationToken;
   saveDraft();
   await clearPending();
-  state.active = await api('/conversations/' + id);
-  setMode(state.active.messages.at(-1)?.kind === 'image' ? 'image' : 'chat');
+  if (requestToken !== navigationToken) return;
+  const conversation = await api('/conversations/' + id);
+  if (requestToken !== navigationToken) return;
+  state.active = state.jobs.get(id)?.conversation || conversation;
+  setBusy();
+  setMode(state.active.messages.at(-1)?.kind === 'image' ? 'image' : 'chat', true);
   restoreDraft(); renderHistory(); renderMessages(); renderModels(); scrollBottom(true);
   closeMobileSidebar();
   try { localStorage.setItem('grok-active', id); } catch {}
   safely(resumeImageGeneration)();
 }
 async function newChat() {
-  if (state.busy) return toast('请先等待回复完成，或点击停止生成。');
+  if (state.submitting) return toast('正在准备发送，请稍等。');
   if (state.uploading) return toast('文件还在读取，请稍等。');
-  saveDraft(); await clearPending(); state.active = null;
+  const requestToken = ++navigationToken;
+  saveDraft(); await clearPending();
+  if (requestToken !== navigationToken) return;
+  state.active = null;
+  setBusy();
   try { localStorage.removeItem('grok-active'); } catch {}
   restoreDraft(); renderHistory(); renderMessages(); renderModels();
   $('#messageInput').focus(); closeMobileSidebar();
 }
 async function uploadFiles(files) {
-  if (state.mode === 'image') return toast('当前为文字生图。分析图片或文件请先点击「生图」切回聊天。');
+  if (state.submitting) return toast('正在准备发送，请稍等。');
   if (state.busy) return toast('回复生成后再添加下一条消息的附件。');
   for (const file of files) {
-    if (state.attachments.length >= 8) { toast('每条消息最多添加 8 个附件。', true); break; }
+    if (state.mode === 'image' && !file.type.startsWith('image/')) { toast(file.name + ' 不是图片，参考图模式只接受图片文件。', true); continue; }
+    const attachmentLimit = state.mode === 'image' ? 5 : 8;
+    if (state.attachments.length >= attachmentLimit) { toast(state.mode === 'image' ? '参考图最多添加 5 张。' : '每条消息最多添加 8 个附件。', true); break; }
     if (file.size > 20 * 1048576) { toast(file.name + ' 超过 20 MB，请压缩或分段。', true); continue; }
     state.uploading++; resizeInput();
     $('#composerStatus').textContent = '正在读取 ' + file.name + '…';
@@ -191,44 +217,60 @@ async function uploadFiles(files) {
     } catch (error) { toast(file.name + '：' + error.message, true); }
     finally { state.uploading--; resizeInput(); }
   }
-  $('#composerStatus').textContent = 'Enter 发送 · Shift + Enter 换行';
+  $('#composerStatus').textContent = state.mode === 'image' ? '可只用文字生图，也可添加图片作为参考' : 'Enter 发送 · Shift + Enter 换行';
   $('#messageInput').focus();
 }
-function setBusy(busy) {
-  state.busy = busy;
+function setBusy() {
+  const job = state.active ? state.jobs.get(state.active.id) : null;
+  state.busy = Boolean(job);
+  const busy = state.busy;
   $('#sendButton').classList.toggle('stopping', busy);
   $('#sendButton').setAttribute('aria-label', busy ? '停止生成' : '发送消息');
-  $('#sendButton').title = busy ? '停止生成' : '发送消息';
-  $('#messageInput').disabled = busy;
-  $('#attachFile').disabled = busy || state.mode === 'image'; $('#attachImage').disabled = busy || state.mode === 'image';
+  $('#sendButton').title = busy ? '停止当前对话的生成' : '发送消息';
+  $('#messageInput').disabled = busy || state.submitting;
+  $('#attachFile').disabled = busy || state.mode === 'image'; $('#attachImage').disabled = busy;
   $('#imageMode').disabled = busy; $('#imageSize').disabled = busy; $('#imageCount').disabled = busy;
   $('#modelSelect').disabled = busy;
-  $('#composerStatus').textContent = busy ? (state.busyKind === 'image' ? '正在生成图片，请稍等…' : '正在回复…') : 'Enter 发送 · Shift + Enter 换行';
+  if (busy) {
+    const elapsed = Math.max(0, Math.floor((Date.now() - job.startedAt) / 1000));
+    const elapsedLabel = elapsed ? ' · 已用 ' + elapsed + ' 秒' : '';
+    $('#composerStatus').textContent = job.kind === 'image' ? '正在生成图片' + elapsedLabel : (job.firstTokenAt ? '正在生成回复' + elapsedLabel : '等待模型首字' + elapsedLabel);
+  } else {
+    $('#composerStatus').textContent = state.mode === 'image' ? '可只用文字生图，也可添加图片作为参考' : 'Enter 发送 · Shift + Enter 换行';
+  }
+  if (state.jobs.size && !busyTicker) busyTicker = setInterval(setBusy, 1000);
+  if (!state.jobs.size && busyTicker) { clearInterval(busyTicker); busyTicker = null; }
   resizeInput();
 }
 async function stopGeneration() {
-  if (!state.assistantId) return toast('正在建立连接，稍后可停止。');
+  const job = state.active ? state.jobs.get(state.active.id) : null;
+  if (!job?.assistantId) return toast('正在建立连接，稍后可停止。');
   $('#composerStatus').textContent = '正在停止，已有内容会保留…';
-  await api('/chat/' + state.assistantId + '/stop', {method:'POST', body:'{}'});
-  state.abort?.abort();
+  await api('/chat/' + job.assistantId + '/stop', {method:'POST', body:'{}'});
+  job.abort?.abort();
 }
 async function resumeImageGeneration() {
   const last = state.active?.messages.at(-1);
-  if (state.polling || !last || last.kind !== 'image' || last.status !== 'streaming') return;
-  state.polling = true; state.busyKind = 'image'; state.assistantId = last.id; setBusy(true);
+  if (!last || last.kind !== 'image' || last.status !== 'streaming' || state.jobs.has(state.active.id)) return;
+  const conversationId = state.active.id;
+  const job = {conversationId, assistantId:last.id, kind:'image', polling:true, startedAt:Date.now(), firstTokenAt:null, conversation:state.active};
+  state.jobs.set(conversationId, job); setBusy();
   try {
-    while (state.active?.id === last.conversation_id) {
+    while (state.jobs.get(conversationId) === job) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      state.active = await api('/conversations/' + last.conversation_id);
-      renderMessages(); scrollBottom();
-      const current = state.active.messages.find((message) => message.id === last.id);
+      job.conversation = await api('/conversations/' + conversationId);
+      if (state.active?.id === conversationId) { state.active = job.conversation; renderMessages(); scrollBottom(); }
+      const current = job.conversation.messages.find((message) => message.id === last.id);
       if (!current || current.status !== 'streaming') break;
     }
   } finally {
-    state.polling = false; state.assistantId = null; setBusy(false); renderMessages(); await refreshHistory();
+    if (state.jobs.get(conversationId) === job) state.jobs.delete(conversationId);
+    if (state.active?.id === conversationId) { state.active = job.conversation; renderMessages(); }
+    setBusy(); await refreshHistory();
   }
 }
 async function sendMessage(regenerate = false) {
+  if (state.submitting) return;
   if (control.running) return toast('电脑控制正在运行，请先停止任务。');
   if (state.busy) return stopGeneration();
   if (state.uploading) return toast('文件还在读取，请稍等。');
@@ -238,16 +280,31 @@ async function sendMessage(regenerate = false) {
   const model = regenerate ? state.active?.messages.at(-1)?.model : $('#modelSelect').value;
   if (!model) { openSettings(); if (kind === 'image') $('#settingsImageModel').focus(); return toast(kind === 'image' ? '请先在设置里选择有权限的生图模型。' : '先获取并选择一个模型。'); }
   const text = $('#messageInput').value.trim();
+  const draftValue = $('#messageInput').value;
+  const draftKey = state.active?.id || 'new';
   if (!regenerate && !text && !state.attachments.length) return;
-  if (kind === 'image' && !regenerate && (!text || state.attachments.length)) return toast('请输入图片描述，并移除待发送的附件。');
-  let conversationId = state.active?.id;
-  let accepted = false, completed = false, renderQueued = false;
-  state.abort = new AbortController(); state.assistantId = null; state.busyKind = kind; setBusy(true);
+  if (kind === 'image' && !regenerate && (!text || state.attachments.some((item) => !item.image_name) || state.attachments.length > 5)) return toast('请输入描述；参考图最多 5 张且只能添加图片。');
+  let conversation = state.active;
+  const attachments = [...state.attachments];
+  state.submitting = true; resizeInput();
   try {
-    if (!state.active) state.active = await api('/conversations', {method:'POST', body:JSON.stringify({model:kind === 'image' ? state.settings.model || '' : model})});
-    conversationId = state.active.id;
-    const body = {conversation_id:conversationId, text, model, attachments:state.attachments.map((item) => item.id), regenerate, image_size:$('#imageSize').value, image_count:Number($('#imageCount').value)};
-    const response = await fetch(kind === 'image' ? '/api/images/generations' : '/api/chat', {method:'POST', headers:{'Content-Type':'application/json','X-GrokDesk-Token':token}, body:JSON.stringify(body), signal:state.abort.signal});
+    if (!conversation) {
+      conversation = await api('/conversations', {method:'POST', body:JSON.stringify({model:kind === 'image' ? state.settings.model || '' : model})});
+      if (!state.active) state.active = conversation;
+    }
+  } catch (error) {
+    state.submitting = false; resizeInput(); throw error;
+  }
+  state.submitting = false;
+  const conversationId = conversation.id;
+  if (state.jobs.has(conversationId)) return toast('这段对话正在生成，请先停止或等待完成。');
+  state.attachments = []; renderPending();
+  let accepted = false, completed = false, renderQueued = false;
+  const job = {conversationId, assistantId:null, kind, abort:new AbortController(), startedAt:Date.now(), firstTokenAt:null, conversation, attachments};
+  state.jobs.set(conversationId, job); setBusy();
+  try {
+    const body = {conversation_id:conversationId, text, model, attachments:attachments.map((item) => item.id), regenerate, image_size:$('#imageSize').value, image_count:Number($('#imageCount').value)};
+    const response = await fetch(kind === 'image' ? '/api/images/generations' : '/api/chat', {method:'POST', headers:{'Content-Type':'application/json','X-GrokDesk-Token':token}, body:JSON.stringify(body), signal:job.abort.signal});
     if (!response.ok) { const result = await response.json(); throw new Error(result.error || '发送失败'); }
     const reader = response.body.getReader(), decoder = new TextDecoder();
     let buffer = '';
@@ -258,23 +315,38 @@ async function sendMessage(regenerate = false) {
       if (!raw) return;
       const data = JSON.parse(raw);
       if (name === 'start') {
-        accepted = true; state.assistantId = data.assistant_id; state.active = data.conversation;
-        if (!regenerate) { $('#messageInput').value = ''; state.attachments = []; renderPending(); saveDraft(); try { localStorage.removeItem('grok-draft-new'); } catch {} }
-        renderMessages(); scrollBottom(true); refreshHistory().catch(() => {});
-        try { localStorage.setItem('grok-active', conversationId); } catch {}
+        accepted = true; job.assistantId = data.assistant_id; job.conversation = data.conversation;
+        if (!regenerate) {
+          removeDraftIfUnchanged(draftKey, draftValue);
+          removeDraftIfUnchanged(conversationId, draftValue);
+        }
+        if (state.active?.id === conversationId) {
+          state.active = job.conversation;
+          if (!regenerate) {
+            $('#messageInput').value = ''; saveDraft();
+          }
+          renderMessages(); scrollBottom(true);
+          try { localStorage.setItem('grok-active', conversationId); } catch {}
+        }
+        refreshHistory().catch(() => {});
       }
       if (name === 'delta') {
-        const message = state.active.messages.find((item) => item.id === state.assistantId);
+        if (!job.firstTokenAt) job.firstTokenAt = Date.now();
+        const message = job.conversation?.messages.find((item) => item.id === job.assistantId);
         if (message) {
           message.content += data.text;
-          if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; updateAssistant(message); }); }
+          if (state.active?.id === conversationId) state.active = job.conversation;
+          if (state.active?.id === conversationId && !renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; if (state.active?.id === conversationId) updateAssistant(message); }); }
         }
       }
-      if (name === 'progress') { state.active = data.conversation; renderMessages(); scrollBottom(true); }
+      if (name === 'progress') { job.conversation = data.conversation; if (state.active?.id === conversationId) { state.active = job.conversation; renderMessages(); scrollBottom(true); } }
       if (name === 'done') {
         completed = true;
-        const message = state.active.messages.find((item) => item.id === state.assistantId);
-        if (message) { Object.assign(message, {status:data.status, error:data.error, usage:data.usage}); updateAssistant(message); }
+        const message = job.conversation?.messages.find((item) => item.id === job.assistantId);
+        if (message) {
+          Object.assign(message, {status:data.status, error:data.error, usage:data.usage, timing:data.timing});
+          if (state.active?.id === conversationId) { state.active = job.conversation; renderMessages(); }
+        }
         if (data.error) toast(data.error, true);
         if (data.status === 'complete') { state.connected = true; connectionStatus(); }
       }
@@ -290,19 +362,25 @@ async function sendMessage(regenerate = false) {
   } catch (error) {
     if (error.name !== 'AbortError') toast(error.message, true);
   } finally {
-    state.abort = null; state.assistantId = null; setBusy(false);
     if (accepted) {
       try {
         for (let attempt = 0; attempt < 30; attempt++) {
-          state.active = await api('/conversations/' + conversationId);
-          if (!state.active.messages.some((message) => message.status === 'streaming')) break;
+          job.conversation = await api('/conversations/' + conversationId);
+          if (!job.conversation.messages.some((message) => message.status === 'streaming')) break;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
       } catch {}
-      renderMessages(); await refreshHistory(); scrollBottom();
-      safely(resumeImageGeneration)();
+      if (state.active?.id === conversationId) { state.active = job.conversation; renderMessages(); scrollBottom(); }
     }
-    $('#messageInput').focus();
+    if (state.jobs.get(conversationId) === job) state.jobs.delete(conversationId);
+    setBusy();
+    if (state.active?.id === conversationId && accepted) renderMessages();
+    await refreshHistory();
+    if (state.active?.id === conversationId) {
+      if (!accepted && attachments.length && !state.attachments.length) { state.attachments = attachments; renderPending(); }
+      if (job.kind === 'image' && job.conversation?.messages.some((message) => message.status === 'streaming')) safely(resumeImageGeneration)();
+      $('#messageInput').focus();
+    }
   }
 }
 function controlActionLabel(action = {}) {
@@ -409,7 +487,7 @@ function handleControlEvent(name, data) {
 async function startControl() {
   if (control.running) return;
   if (isPreview) return toast('请从 GrokDesk 启动程序打开，预览页面不能控制电脑。', true);
-  if (state.busy || state.uploading) return toast('请等待当前回复或文件上传完成。');
+  if (state.jobs.size || state.submitting || state.uploading) return toast('请等待所有回复或文件上传完成。');
   if (!state.settings.has_api_key) { $('#controlDialog').close(); openSettings(); return toast('请先设置模型连接。'); }
   const task = $('#controlTask').value.trim(), model = $('#controlModel').value.trim();
   const mode = $('#controlMode').value, maxSteps = Number($('#controlMaxSteps').value);
@@ -523,7 +601,7 @@ async function exitApp() {
   if (!await question('退出 Grok Desk？', '已有聊天会保留，正在生成的回复会停止。下次双击桌面图标即可打开。')) return;
   saveDraft();
   await api('/exit', {method:'POST', body:'{}'});
-  state.abort?.abort();
+  for (const job of state.jobs.values()) job.abort?.abort();
   document.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close());
   const notice = $('#startupNotice');
   notice.querySelector('span').textContent = 'Grok Desk 已退出。再次使用请双击桌面上的 Grok Desk 图标。';
@@ -571,7 +649,7 @@ function showMenu(button, id) {
     }
     if (action === 'pin') await api('/conversations/' + id, {method:'PATCH', body:JSON.stringify({pinned:!item.pinned})});
     if (action === 'delete') {
-      if (state.busy && state.active?.id === id) return toast('请先停止这段对话的生成。');
+      if (state.jobs.has(id)) return toast('请先停止这段对话的生成。');
       if (!await question('删除这段对话？', '「' + item.title + '」的消息和附件会从本机删除。')) return;
       await api('/conversations/' + id, {method:'DELETE'});
       if (state.active?.id === id) await newChat();
@@ -659,7 +737,12 @@ function bindEvents() {
   document.addEventListener('dragover', (event) => event.preventDefault());
   document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('#dropOverlay').hidden = true; });
   document.addEventListener('drop', safely(async (event) => { event.preventDefault(); dragDepth = 0; $('#dropOverlay').hidden = true; if (event.dataTransfer?.files.length) await uploadFiles([...event.dataTransfer.files]); }));
-  window.addEventListener('beforeunload', () => { saveDraft(); if (state.busy && state.assistantId && state.busyKind !== 'image') fetch('/api/chat/' + state.assistantId + '/stop', {method:'POST', headers:{'Content-Type':'application/json','X-GrokDesk-Token':token}, body:'{}', keepalive:true}).catch(() => {}); });
+  window.addEventListener('beforeunload', () => {
+    saveDraft();
+    for (const job of state.jobs.values()) {
+      if (job.assistantId && job.kind !== 'image') fetch('/api/chat/' + job.assistantId + '/stop', {method:'POST', headers:{'Content-Type':'application/json','X-GrokDesk-Token':token}, body:'{}', keepalive:true}).catch(() => {});
+    }
+  });
 }
 async function initialize() {
   try { $('.app-shell').classList.toggle('sidebar-collapsed', localStorage.getItem('grok-sidebar-collapsed') === 'true'); } catch {}

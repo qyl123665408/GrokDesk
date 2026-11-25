@@ -1,12 +1,13 @@
 # GrokDesk
 
-Windows 桌面 AI 聊天工具。1.4.0 使用独立的 WebView2 窗口，支持聊天、附件、历史记录和本机电脑控制。关闭窗口会退出软件；重复启动会恢复已有窗口。
+Windows 桌面 AI 聊天工具。1.5.0 使用独立的 WebView2 窗口，支持并行会话、附件、文字生图与参考图生图，以及本机电脑控制。关闭窗口会退出软件；重复启动会恢复已有窗口。
 
 软件通过 OpenAI 兼容的 `/v1/models` 和 `/v1/chat/completions` 接口连接服务商。请使用自己的 API 地址、密钥和有权限的模型。本项目不包含 Grok 订阅、API 密钥或模型额度。
 
 ## 功能
 
-- 流式聊天、停止生成、重新生成、多会话历史和搜索。
+- 流式聊天、停止生成、重新生成；不同会话可并行生成，回答显示首字与总耗时。
+- 文字生图和参考图生图，支持最多 5 张参考图。生图模型权限和 `/images/generations`、`/images/edits` 接口由服务商提供。
 - 图片及常用文档附件、拖放文件、粘贴图片。
 - Markdown 和 JSON 导出、深浅主题、输入草稿。
 - 看屏幕、鼠标点击、文本输入、快捷键和滚动。
@@ -71,7 +72,13 @@ New-Item -ItemType Directory -Path .\test-output -Force | Out-Null
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-也可以用 `-PythonExecutable` 指定 Python 入口。构建输出为 `dist\GrokDesk\GrokDesk.exe` 和 `dist\GrokDesk-Windows.zip`。发布时应提供完整 ZIP，避免只复制 EXE。
+也可以用 `-PythonExecutable` 指定 Python 入口。默认输出为 `dist\GrokDesk\GrokDesk.exe` 和 `dist\GrokDesk-Windows.zip`。本地需要保留旧目录时，可指定独立输出名：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -ReleaseName GrokDesk-1.5.0
+```
+
+这会生成 `dist\GrokDesk-1.5.0\GrokDesk.exe` 和 `dist\GrokDesk-1.5.0-Windows.zip`。发布时应提供完整 ZIP，避免只复制 EXE。
 
 ## 更新和发布
 
@@ -81,7 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 git pull --ff-only
 ```
 
-更新源码后，关闭正在运行的 GrokDesk，安装变更后的 Python 依赖，再运行 `build.ps1` 重新生成桌面版。用户数据目录独立于源码；构建脚本会先备份已有便携数据，生成干净 ZIP 后再恢复本机数据。
+更新源码后，关闭正在运行的 GrokDesk，安装变更后的 Python 依赖，再运行 `build.ps1` 重新生成桌面版。ZIP 从独立暂存目录生成，不会包含本机的 `GrokDeskData`；构建到已有输出目录时，复制新程序文件会保留其中单独存放的用户数据目录。
 
 GitHub Actions 会在推送到 `main` 分支或推送以 `v` 开头的版本标签时执行 Windows 单元测试和打包，并提供可下载的 ZIP 构建产物。版本标签还会创建对应的 GitHub Release 并附上 ZIP。自动构建不会执行需要可交互桌面的原生 GUI 测试，也不会使用个人 API 密钥。
 

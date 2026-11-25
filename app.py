@@ -35,7 +35,7 @@ from computer_control import (ControlError, ControlRun, DesktopController,
                               parse_action)
 
 APP_NAME = 'Grok Desk'
-APP_VERSION = '1.4.0'
+APP_VERSION = '1.5.0'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 MAX_FILE = 20 * 1024 * 1024
 MAX_TEXT = 120_000
@@ -82,8 +82,13 @@ def normalize_base(value):
     parsed = urlparse(value)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise UserError('请填写完整的 API 地址，例如 https://ergouzi.life。')
-    value = re.sub(r'/(chat/completions|images/generations|models)$', '', value)
+    value = re.sub(r'/(chat/completions|images/(generations|edits)|models)$', '', value)
     return value if value.endswith('/v1') else value + '/v1'
+
+
+def uses_xai_image_protocol(endpoint):
+    hostname = (urlparse(endpoint).hostname or '').lower()
+    return hostname == 'x.ai' or hostname.endswith('.x.ai')
 
 
 class Settings:
@@ -854,13 +859,16 @@ class Handler(BaseHTTPRequestHandler):
         config = self.app.settings.credentials()
         conversation_id = str(body.get('conversation_id', ''))
         conversation = self.app.db.conversation(conversation_id)
-        if body.get('attachments'):
-            raise UserError('当前生图功能根据文字描述生成图片。请先移除附件；分析附件可以切回聊天。')
         model = str(body.get('model') or config['image_model']).strip()
         prompt = str(body.get('text', '')).strip()
         size = body.get('image_size', config['image_size'])
         count = body.get('image_count', config['image_count'])
-        if body.get('regenerate'):
+        requested_ids = body.get('attachments', [])
+        if not isinstance(requested_ids, list) or len(requested_ids) > 5 or any(not isinstance(identifier, str) for identifier in requested_ids) or len(set(requested_ids)) != len(requested_ids):
+            raise UserError('参考图最多添加 5 张。')
+        input_ids = requested_ids
+        regenerate = bool(body.get('regenerate'))
+        if regenerate:
             last = conversation['messages'][-1] if conversation['messages'] else None
             if not last or last['kind'] != 'image' or last['role'] != 'assistant':
                 raise UserError('没有可以重新生成的图片。')
@@ -871,8 +879,47 @@ class Handler(BaseHTTPRequestHandler):
             model = original['model']
             size = original['generation'].get('size', 'auto')
             count = original['generation'].get('count', 1)
+            input_ids = last['generation'].get('input_attachments', [])
+            if not input_ids and original.get('attachments'):
+                input_ids = [item['id'] for item in original['attachments'] if item.get('image_name')]
+        image_records = []
+        for identifier in input_ids:
+            record = self.app.db.query('SELECT * FROM attachments WHERE id=?', (identifier,), True)
+            if not record or not record['image_name'] or (not regenerate and record['message_id'] is not None):
+                raise UserError('参考图已使用或不是受支持的图片，请重新添加。')
+            image_records.append(record)
         payload = self.app.image_payload(model, prompt, size, count)
-        generation = {'model': model, 'size': size, 'count': count}
+        edit_request = bool(image_records)
+        request_options = {'json': payload}
+        if edit_request:
+            try:
+                image_sizes = [(self.app.uploads / record['image_name']).stat().st_size for record in image_records]
+            except OSError:
+                raise UserError('参考图片文件不存在或无法读取，请重新添加后重试。')
+            if sum(image_sizes) > 20 * 1048576:
+                raise UserError('参考图片合计不能超过 20 MB，请缩小图片后重试。')
+            try:
+                reference_images = [
+                    (record, (self.app.uploads / record['image_name']).read_bytes())
+                    for record in image_records
+                ]
+            except OSError:
+                raise UserError('参考图片文件不存在或无法读取，请重新添加后重试。')
+            if uses_xai_image_protocol(config['endpoint']):
+                images = [
+                    {'type': 'image_url', 'url': 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')}
+                    for _, raw in reference_images
+                ]
+                payload['image' if len(images) == 1 else 'images'] = images[0] if len(images) == 1 else images
+            else:
+                request_options = {
+                    'data': {key: str(value) for key, value in payload.items()},
+                    'files': [
+                        ('image[]', (Path(record['name']).stem + '.png', raw, 'image/png'))
+                        for record, raw in reference_images
+                    ],
+                }
+        generation = {'model': model, 'size': size, 'count': count, 'edit': edit_request, 'input_attachments': [record['id'] for record in image_records]}
         assistant_id, user_id = uuid.uuid4().hex, uuid.uuid4().hex
         job = Job(conversation_id)
         with self.app.jobs_lock:
@@ -886,6 +933,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Keep earlier pictures when regenerating, even if the next request fails.
                 for identifier, role, text, state in [(user_id, 'user', prompt, 'complete'), (assistant_id, 'assistant', '', 'streaming')]:
                     db.execute('INSERT INTO messages(id,conversation_id,role,content,status,created_at,model,kind,generation) VALUES (?,?,?,?,?,?,?,?,?)', (identifier, conversation_id, role, text, state, now(), model, 'image', json.dumps(generation)))
+                if not regenerate:
+                    for record in image_records:
+                        db.execute('UPDATE attachments SET message_id=? WHERE id=? AND message_id IS NULL', (user_id, record['id']))
                 if not conversation['messages']:
                     db.execute('UPDATE conversations SET title=? WHERE id=?', (prompt.replace('\n', ' ')[:36], conversation_id))
                 db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (now(), conversation_id))
@@ -900,7 +950,8 @@ class Handler(BaseHTTPRequestHandler):
             with httpx.Client(timeout=httpx.Timeout(300, connect=20), follow_redirects=False) as client:
                 job.response = client
                 if not job.cancel.is_set():
-                    with client.stream('POST', config['endpoint'] + '/images/generations', headers={'Authorization': 'Bearer ' + config['api_key']}, json=payload) as response:
+                    endpoint = '/images/edits' if edit_request else '/images/generations'
+                    with client.stream('POST', config['endpoint'] + endpoint, headers={'Authorization': 'Bearer ' + config['api_key']}, **request_options) as response:
                         job.response = response
                         raw = bytearray()
                         for part in response.iter_bytes():
@@ -911,7 +962,8 @@ class Handler(BaseHTTPRequestHandler):
                                 raise UserError('服务返回的图片数据过大。')
                         if not job.cancel.is_set():
                             if response.status_code >= 400:
-                                raise UserError(upstream_error(response.status_code, raw.decode('utf-8', 'replace'), config['api_key']) + '\n请确认密钥分组包含所选生图模型。')
+                                suffix = '请确认服务商支持 /images/edits，并且密钥分组包含所选模型。' if edit_request else '请确认密钥分组包含所选生图模型。'
+                                raise UserError(upstream_error(response.status_code, raw.decode('utf-8', 'replace'), config['api_key']) + '\n' + suffix)
                             try:
                                 result = json.loads(raw)
                             except ValueError:
@@ -922,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
                                 raise UserError(upstream_error(400, json.dumps(result), config['api_key']))
                             data = result.get('data')
                             if not isinstance(data, list) or not data or len(data) > 4:
-                                raise UserError('服务没有返回图片，请确认该模型支持 /images/generations 接口。')
+                                raise UserError('服务没有返回图片，请确认所选模型支持 ' + endpoint + ' 接口。')
                             usage = result.get('usage') if isinstance(result.get('usage'), dict) else {}
                     if not job.cancel.is_set():
                         for item in data:
@@ -969,6 +1021,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.jobs.pop(assistant_id, None)
 
     def chat(self, body):
+        task_started = time.monotonic()
         config = self.app.settings.credentials()
         model = str(body.get('model') or config['model']).strip()
         if not model:
@@ -989,6 +1042,11 @@ class Handler(BaseHTTPRequestHandler):
             self.app.jobs[assistant_id] = job
         content, usage, error, status = '', {}, '', 'complete'
         streaming_started = False
+        request_started = None
+        request_ms = None
+        response_ms = None
+        first_token_ms = None
+        streaming_response = False
         try:
             if body.get('regenerate'):
                 if not conversation['messages']:
@@ -1031,7 +1089,9 @@ class Handler(BaseHTTPRequestHandler):
             self.event('start', {'assistant_id': assistant_id, 'conversation': self.app.db.conversation(conversation_id)})
             saved_at = time.monotonic()
             with httpx.Client(timeout=httpx.Timeout(150, connect=20), follow_redirects=False) as client:
+                request_started = time.monotonic()
                 with client.stream('POST', config['endpoint'] + '/chat/completions', headers={'Authorization': 'Bearer ' + config['api_key'], 'Content-Type': 'application/json'}, json=payload) as response:
+                    request_ms = round((time.monotonic() - request_started) * 1000)
                     job.response = response
                     if job.cancel.is_set():
                         status = 'stopped'
@@ -1048,6 +1108,7 @@ class Handler(BaseHTTPRequestHandler):
                         except (ValueError, KeyError, IndexError, TypeError):
                             raise UserError('服务没有返回有效回复，请检查 API 地址和模型。')
                     else:
+                        streaming_response = True
                         for line in response.iter_lines():
                             if job.cancel.is_set():
                                 status = 'stopped'
@@ -1071,11 +1132,14 @@ class Handler(BaseHTTPRequestHandler):
                                 if isinstance(delta, list):
                                     delta = ''.join(part.get('text', '') for part in delta if isinstance(part, dict))
                                 if delta:
+                                    if first_token_ms is None:
+                                        first_token_ms = round((time.monotonic() - request_started) * 1000)
                                     content += delta
                                     self.event('delta', {'text': delta})
                             if time.monotonic() - saved_at > 0.5:
                                 self.app.db.execute('UPDATE messages SET content=? WHERE id=?', (content, assistant_id))
                                 saved_at = time.monotonic()
+                response_ms = round((time.monotonic() - request_started) * 1000)
             if job.cancel.is_set():
                 status = 'stopped'
             if not content and status != 'stopped':
@@ -1095,10 +1159,19 @@ class Handler(BaseHTTPRequestHandler):
                     error = '连接中断或模型服务不可用。已有内容已保存，可以重试。'
         finally:
             if streaming_started:
+                timing = {
+                    'request_ms': request_ms,
+                    'response_ms': response_ms,
+                    'first_token_ms': first_token_ms,
+                    'total_ms': round((time.monotonic() - task_started) * 1000),
+                    'streaming': streaming_response,
+                }
+                usage = dict(usage) if isinstance(usage, dict) else {}
+                usage['grokdesk_timing'] = timing
                 self.app.db.execute('UPDATE messages SET content=?,status=?,error=?,usage=? WHERE id=?', (content, status, error, json.dumps(usage), assistant_id))
                 self.app.db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (now(), conversation_id))
                 try:
-                    self.event('done', {'assistant_id': assistant_id, 'status': status, 'error': error, 'usage': usage})
+                    self.event('done', {'assistant_id': assistant_id, 'status': status, 'error': error, 'usage': usage, 'timing': timing})
                 except (OSError, ValueError):
                     pass
             with self.app.jobs_lock:
