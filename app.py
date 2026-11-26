@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import uuid
+import webbrowser
 import zipfile
 from dataclasses import dataclass, field
 from contextlib import contextmanager
@@ -35,7 +36,9 @@ from computer_control import (ControlError, ControlRun, DesktopController,
                               parse_action)
 
 APP_NAME = 'Grok Desk'
-APP_VERSION = '1.5.0'
+APP_VERSION = '1.5.1'
+LATEST_RELEASE_API = 'https://api.github.com/repos/qyl123665408/GrokDesk/releases/latest'
+RELEASE_PAGE_URL = 'https://github.com/qyl123665408/GrokDesk/releases/latest'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 MAX_FILE = 20 * 1024 * 1024
 MAX_TEXT = 120_000
@@ -46,6 +49,40 @@ MAX_GENERATED_IMAGE = 40 * 1024 * 1024
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def check_for_updates():
+    try:
+        response = httpx.get(
+            LATEST_RELEASE_API,
+            headers={'Accept': 'application/vnd.github+json', 'User-Agent': f'GrokDesk/{APP_VERSION}'},
+            timeout=4.0,
+        )
+    except httpx.TimeoutException as error:
+        raise UserError('检查更新超时，请稍后重试。', 502) from error
+    except httpx.HTTPError as error:
+        raise UserError('暂时无法连接 GitHub 检查更新。', 502) from error
+    if response.status_code == 404:
+        raise UserError('没有找到可公开访问的 GitHub Release。', 502)
+    try:
+        response.raise_for_status()
+        release = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise UserError('GitHub 暂时无法提供版本信息，请稍后重试。', 502) from error
+
+    tag = release.get('tag_name') if isinstance(release, dict) else None
+    match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', str(tag or ''))
+    current = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', APP_VERSION)
+    if not match or not current:
+        raise UserError('GitHub 返回的版本号格式不正确。', 502)
+    latest_version = tuple(map(int, match.groups()))
+    current_version = tuple(map(int, current.groups()))
+    return {
+        'current_version': APP_VERSION,
+        'latest_version': '.'.join(match.groups()),
+        'update_available': latest_version > current_version,
+        'release_url': RELEASE_PAGE_URL,
+    }
 
 
 class UserError(Exception):
@@ -586,6 +623,13 @@ class Handler(BaseHTTPRequestHandler):
             raise UserError('页面连接已过期，请重新打开软件。', 403)
         if path == '/api/bootstrap' and method == 'GET':
             self.send_data({'settings': self.app.settings.public(), 'data_dir': str(self.app.folder), 'version': APP_VERSION})
+        elif path == '/api/update-check' and method == 'GET':
+            self.send_data(check_for_updates())
+        elif path == '/api/open-release' and method == 'POST':
+            self.read_json()
+            if not webbrowser.open(RELEASE_PAGE_URL):
+                raise UserError('无法打开 GitHub Release 页面。', 502)
+            self.send_data({'ok': True})
         elif path == '/api/exit' and method == 'POST':
             self.read_json()
             self.send_data({'ok': True})

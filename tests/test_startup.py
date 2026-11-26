@@ -136,7 +136,7 @@ class StartupTests(unittest.TestCase):
                         self.assertEqual(client.post('/api/exit', json={}).status_code, 403)
                         client.headers['X-GrokDesk-Token'] = token
                         bootstrap = client.get('/api/bootstrap').raise_for_status().json()
-                        self.assertEqual(bootstrap['version'], '1.5.0')
+                        self.assertEqual(bootstrap['version'], '1.5.1')
                         self.assertEqual(Path(bootstrap['data_dir']).resolve(), Path(folder).resolve())
                         time.sleep(0.3)
                         self.assertTrue(thread.is_alive(), failures)

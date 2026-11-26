@@ -12,8 +12,15 @@ const fixture = JSON.parse(await fs.readFile(path.join(output, 'server.json'), '
 const browser = await chromium.launch({headless:true, ...(process.env.PLAYWRIGHT_BROWSER_EXECUTABLE ? {executablePath:process.env.PLAYWRIGHT_BROWSER_EXECUTABLE} : {})});
 const page = await browser.newPage({viewport:{width:1440,height:960},deviceScaleFactor:1});
 const errors = [];
+let updateAvailable = false;
 page.on('pageerror', (error) => errors.push(error.message));
 try {
+  await page.route('**/api/update-check', (route) => route.fulfill({
+    status:200,
+    contentType:'application/json',
+    body:JSON.stringify({current_version:'1.5.1',latest_version:updateAvailable?'1.5.2':'1.5.1',update_available:updateAvailable,release_url:'https://github.com/qyl123665408/GrokDesk/releases/latest'})
+  }));
+  await page.route('**/api/open-release', (route) => route.fulfill({status:200,contentType:'application/json',body:'{"ok":true}'}));
   await page.goto(process.env.GROK_TEST_URL || fixture.url);
   await page.getByRole('button', {name:'连接与偏好设置'}).waitFor();
   await page.waitForFunction(() => document.querySelector('#historyList').children.length > 0);
@@ -29,6 +36,15 @@ try {
   await page.locator('#openSettings').click();
   assert.equal(await page.locator('.settings-advanced').getAttribute('open'),null);
   await page.screenshot({path:path.join(output, '05-settings.png')});
+  await page.locator('#checkUpdates').click();
+  await page.getByText('当前版本 v1.5.1 · 已是最新', {exact:true}).waitFor();
+  updateAvailable = true;
+  await page.locator('#checkUpdates').click();
+  await page.locator('#updateDialog[open]').waitFor();
+  await page.getByText('当前版本 v1.5.1，GitHub 上有新版本 v1.5.2。', {exact:false}).waitFor();
+  await page.locator('#openUpdateDialogRelease').click();
+  await page.locator('#updateDialog[open]').waitFor({state:'hidden'});
+  await page.getByText('已在浏览器中打开 GitHub 下载页。', {exact:true}).waitFor();
   await page.locator('#toggleImport').click();
   await page.locator('#connectionJson').fill(JSON.stringify({_type:'newapi_channel_conn',key:'synthetic-ui-import-key',url:fixture.provider_url}));
   await page.locator('#importConnection').click();
@@ -64,6 +80,8 @@ try {
   await page.locator('.message.assistant').nth(1).waitFor();
   await page.getByRole('button',{name:'重新生成',exact:true}).waitFor();
   await page.reload();
+  await page.locator('#updateDialog[open]').waitFor();
+  await page.locator('[data-close="updateDialog"]').click();
   await page.locator('.message.assistant').nth(1).waitFor();
   assert.equal(await page.locator('.message').count(),4);
   await page.locator('#historySearch').fill('待办');
@@ -147,7 +165,7 @@ try {
   await page.locator('#openSettings').click();
   await page.locator('#exitApp').click();
   await page.locator('#smallCancel').click();
-  assert.equal(await page.evaluate(async () => (await api('/bootstrap')).version), '1.5.0');
+  assert.equal(await page.evaluate(async () => (await api('/bootstrap')).version), '1.5.1');
   await page.locator('#exitApp').click();
   await page.locator('#smallConfirm').click();
   await page.getByText('Grok Desk 已退出。再次使用请双击桌面上的 Grok Desk 图标。', {exact:true}).waitFor();

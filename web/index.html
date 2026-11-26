@@ -95,6 +95,7 @@
    <label>默认模型<div class="model-field"><input id="settingsModel" list="modelOptions" placeholder="获取列表后选择，也可以手动填写"><button class="secondary-button" id="fetchModels"><svg><use href="#i-refresh"/></svg>获取模型</button></div><datalist id="modelOptions"></datalist></label><div id="connectionResult" class="connection-result" hidden></div>
    <label>生图模型<input id="settingsImageModel" list="imageModelOptions" placeholder="选择有权限的生图模型，或填写准确名称"><datalist id="imageModelOptions"></datalist></label><p class="field-hint" id="imageModelHint">生图和聊天使用同一把密钥，需要服务商开通对应模型。</p>
   </section>
+  <section class="settings-section updates-section"><div class="section-title"><div><h3>软件更新</h3><p id="updateStatus">当前版本 v1.5.1</p></div><button class="secondary-button" id="checkUpdates">检查更新</button></div><button class="text-button" id="openUpdateRelease" hidden>打开 GitHub 下载页</button></section>
   <details class="settings-section settings-advanced"><summary>回答与阅读偏好<svg><use href="#i-chevron"/></svg></summary>
    <label>助手指令<textarea id="systemPrompt" rows="3" placeholder="例如：用中文回答，先给结论，再给步骤。"></textarea></label>
    <div class="settings-grid"><label>随机性 <span class="subtle">0–2</span><input id="temperature" type="number" min="0" max="2" step="0.1"></label><label>最大回复长度 <span class="subtle">Token</span><input id="maxTokens" type="number" min="256" max="65536" step="256"></label><label>携带最近几轮对话<input id="contextTurns" type="number" min="1" max="100"></label><label>聊天字号<select id="fontSize"><option value="13">小 · 13px</option><option value="15">标准 · 15px</option><option value="17">大 · 17px</option><option value="19">特大 · 19px</option></select></label></div>
@@ -104,6 +105,7 @@
  </div>
  <div class="dialog-footer"><span>密钥留空会保留已保存的密钥</span><button class="primary-button" id="saveSettings">保存设置<svg><use href="#i-check"/></svg></button></div>
 </dialog>
+<dialog id="updateDialog" class="small-dialog"><h2>发现新版本</h2><p id="updateDialogText"></p><div class="small-actions"><button class="secondary-button" data-close="updateDialog">稍后</button><button class="primary-button" id="openUpdateDialogRelease">打开下载页</button></div></dialog>
 <dialog id="smallDialog" class="small-dialog"><h2 id="smallTitle"></h2><p id="smallDescription"></p><input id="smallInput" hidden><div class="small-actions"><button class="secondary-button" id="smallCancel">取消</button><button class="primary-button" id="smallConfirm">确定</button></div></dialog>
 <dialog id="controlDialog" class="control-dialog">
  <div class="dialog-heading"><h2>控制电脑</h2><button class="icon-button" data-close="controlDialog" aria-label="关闭控制面板"><svg><use href="#i-close"/></svg></button></div>

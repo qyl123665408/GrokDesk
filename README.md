@@ -1,6 +1,6 @@
 # GrokDesk
 
-Windows 桌面 AI 聊天工具。1.5.0 使用独立的 WebView2 窗口，支持并行会话、附件、文字生图与参考图生图，以及本机电脑控制。关闭窗口会退出软件；重复启动会恢复已有窗口。
+Windows 桌面 AI 聊天工具。1.5.1 使用独立的 WebView2 窗口，支持并行会话、附件、文字生图与参考图生图、本机电脑控制和 GitHub 更新通知。关闭窗口会退出软件；重复启动会恢复已有窗口。
 
 软件通过 OpenAI 兼容的 `/v1/models` 和 `/v1/chat/completions` 接口连接服务商。请使用自己的 API 地址、密钥和有权限的模型。本项目不包含 Grok 订阅、API 密钥或模型额度。
 
@@ -75,10 +75,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 也可以用 `-PythonExecutable` 指定 Python 入口。默认输出为 `dist\GrokDesk\GrokDesk.exe` 和 `dist\GrokDesk-Windows.zip`。本地需要保留旧目录时，可指定独立输出名：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -ReleaseName GrokDesk-1.5.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -ReleaseName GrokDesk-1.5.1
 ```
 
-这会生成 `dist\GrokDesk-1.5.0\GrokDesk.exe` 和 `dist\GrokDesk-1.5.0-Windows.zip`。发布时应提供完整 ZIP，避免只复制 EXE。
+这会生成 `dist\GrokDesk-1.5.1\GrokDesk.exe` 和 `dist\GrokDesk-1.5.1-Windows.zip`。发布时应提供完整 ZIP，避免只复制 EXE。
 
 ## 更新和发布
 

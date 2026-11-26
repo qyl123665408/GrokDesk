@@ -6,6 +6,7 @@ const state = {settings: {}, models: [], conversations: [], active: null, attach
 const control = {running:false, runId:null, abort:null, step:0, maxSteps:20, mode:'confirm', screen:null, pending:null, stopping:false};
 let busyTicker = null;
 let navigationToken = 0;
+let latestReleaseAvailable = false;
 const isImageModel = (name) => /image|imagine|dall.e|flux|sdxl|stable.diffusion|seedream|ideogram|recraft|cogview|kolors|nano.banana/i.test(name) && !/video/i.test(name);
 const icon = (name) => '<svg aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
@@ -552,6 +553,32 @@ function openSettings() {
   $('#connectionJson').value = ''; $('#importArea').hidden = true;
   $('#settingsDialog').showModal();
 }
+async function checkForUpdates(manual = false) {
+  const button = $('#checkUpdates');
+  if (button) { button.disabled = true; button.textContent = '检查中…'; }
+  try {
+    const result = await api('/update-check');
+    latestReleaseAvailable = result.update_available;
+    $('#updateStatus').textContent = result.update_available ? '发现新版本 v' + result.latest_version : '当前版本 v' + result.current_version + ' · 已是最新';
+    $('#openUpdateRelease').hidden = !result.update_available;
+    if (result.update_available) {
+      $('#updateDialogText').textContent = '当前版本 v' + result.current_version + '，GitHub 上有新版本 v' + result.latest_version + '。打开下载页后，下载完整 ZIP 并解压覆盖程序文件，保留 GrokDeskData。';
+      if (!document.querySelector('dialog[open]') || manual) $('#updateDialog').showModal();
+      else toast('发现新版本 v' + result.latest_version + '，可在设置中查看下载页。');
+    } else if (manual) toast('当前已是最新版本。');
+  } catch (error) {
+    $('#updateStatus').textContent = '暂时无法检查更新';
+    $('#openUpdateRelease').hidden = true;
+    if (manual) toast(error.message, true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '检查更新'; }
+  }
+}
+async function openUpdateRelease() {
+  if (!latestReleaseAvailable) return;
+  await api('/open-release', {method:'POST', body:'{}'});
+  toast('已在浏览器中打开 GitHub 下载页。');
+}
 async function saveSettings(close = true) {
   const data = {base_url:$('#baseUrl').value.trim(), api_key:$('#apiKey').value.trim(), model:$('#settingsModel').value.trim(), image_model:$('#settingsImageModel').value.trim(), system_prompt:$('#systemPrompt').value, temperature:Number($('#temperature').value), max_tokens:Number($('#maxTokens').value), context_turns:Number($('#contextTurns').value), font_size:Number($('#fontSize').value)};
   state.settings = await api('/settings', {method:'POST', body:JSON.stringify(data)});
@@ -682,6 +709,9 @@ function bindEvents() {
   bindControlEvents();
   $('#newChat').onclick = safely(newChat);
   $('#openSettings').onclick = openSettings;
+  $('#checkUpdates').onclick = safely(() => checkForUpdates(true));
+  $('#openUpdateRelease').onclick = safely(openUpdateRelease);
+  $('#openUpdateDialogRelease').onclick = safely(async () => { await openUpdateRelease(); $('#updateDialog').close(); });
   $('#saveSettings').onclick = safely(() => saveSettings(true));
   $('#exitApp').onclick = safely(exitApp);
   $('#fetchModels').onclick = fetchModels;
@@ -755,6 +785,7 @@ async function initialize() {
   }
   const data = await api('/bootstrap'); state.settings = data.settings;
   $('#dataLocation').textContent = data.data_dir;
+  $('#updateStatus').textContent = '当前版本 v' + data.version;
   try { state.models = JSON.parse(localStorage.getItem('grok-models') || '[]'); } catch {}
   if (!Array.isArray(state.models)) state.models = [];
   applyTheme(); connectionStatus(); renderModels(); await refreshHistory();
@@ -762,5 +793,6 @@ async function initialize() {
   try { last = localStorage.getItem('grok-active'); } catch {}
   if (last && state.conversations.some((item) => item.id === last)) await openConversation(last);
   else { restoreDraft(); renderMessages(); }
+  checkForUpdates(false);
 }
 initialize().catch((error) => toast(error.message, true));
